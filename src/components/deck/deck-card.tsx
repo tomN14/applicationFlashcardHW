@@ -18,11 +18,19 @@ export function DeckCard({ deck }: DeckCardProps) {
           {deck.description}
         </p>
       ) : null}
-      {deck.cardCount != null ? (
-        <p className="mt-2 text-xs text-zinc-500">
-          {deck.cardCount} cards (placeholder)
-        </p>
-      ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+        <Link
+          href={`/decks/${deck.id}/study`}
+          className="font-medium text-zinc-900 underline decoration-zinc-400 underline-offset-2 hover:decoration-zinc-600 dark:text-zinc-50 dark:hover:decoration-zinc-400"
+        >
+          Study
+        </Link>
+        {deck.cardCount != null ? (
+          <span className="text-xs text-zinc-500">
+            {deck.cardCount} cards (placeholder)
+          </span>
+        ) : null}
+      </div>
     </article>
   );
 }

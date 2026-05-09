@@ -18,9 +18,6 @@ export default function DashboardPage() {
         <Link href="/decks" className="text-zinc-700 underline dark:text-zinc-300">
           My decks
         </Link>
-        <Link href="/study" className="text-zinc-700 underline dark:text-zinc-300">
-          Study
-        </Link>
         <Link href="/pricing" className="text-zinc-700 underline dark:text-zinc-300">
           Pricing
         </Link>

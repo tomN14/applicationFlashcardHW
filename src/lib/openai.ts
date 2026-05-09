@@ -9,9 +9,10 @@ let openai: OpenAI | null = null;
 
 export function getOpenAI(): OpenAI {
   if (!openai) {
-    const key = process.env.OPENAI_API_KEY;
+    const key =
+      process.env.OPENAI_API_KEY ?? process.env.OPEN_AI_API_KEY;
     if (!key) {
-      throw new Error("OPENAI_API_KEY is not set");
+      throw new Error("OPENAI_API_KEY (or OPEN_AI_API_KEY) is not set");
     }
     openai = new OpenAI({ apiKey: key });
   }
