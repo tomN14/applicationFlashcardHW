@@ -4,6 +4,25 @@ import { DecksPageClient, type DeckListItem } from "./decks-page-client";
 
 export const dynamic = "force-dynamic";
 
+function formatLoadError(e: unknown): string {
+  if (e instanceof Error && e.message) {
+    return e.message;
+  }
+  if (e && typeof e === "object" && "message" in e) {
+    const r = e as { message?: string; details?: string; hint?: string };
+    const parts = [r.message, r.details, r.hint].filter(
+      (s): s is string => typeof s === "string" && s.length > 0,
+    );
+    if (parts.length > 0) {
+      return parts.join(" ");
+    }
+  }
+  if (typeof e === "string" && e) {
+    return e;
+  }
+  return "Something went wrong loading decks.";
+}
+
 function normalizeDecks(rows: DeckRow[] | null): DeckListItem[] {
   if (!rows?.length) {
     return [];
@@ -76,8 +95,7 @@ export default async function DecksPage() {
 
     decks = normalizeDecks(data as DeckRow[] | null);
   } catch (e) {
-    loadError =
-      e instanceof Error ? e.message : "Something went wrong loading decks.";
+    loadError = formatLoadError(e);
   }
 
   return (
