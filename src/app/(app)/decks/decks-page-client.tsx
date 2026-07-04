@@ -14,24 +14,15 @@ import {
 import {
   createDeck,
   deleteDeck,
-  updateDeck,
 } from "@/app/actions/decks";
+import { syncCommunityDeck } from "@/app/actions/community-decks";
+import type { DeckListItem } from "@/lib/load-decks-list";
 import { DeckGenerateWizard } from "./deck-generate-wizard";
-
-export type DeckListItem = {
-  id: string;
-  user_id: string;
-  title: string;
-  description: string | null;
-  is_public: boolean;
-  created_at: string;
-  cardCount: number;
-};
 
 type DecksPageClientProps = {
   decks: DeckListItem[];
-  defaultUserId: string | null;
-  hasUsers: boolean;
+  isSignedIn: boolean;
+  authUserId: string | null;
   loadError: string | null;
 };
 
@@ -69,29 +60,26 @@ function tempDeckId(): string {
   return `optimistic-${crypto.randomUUID()}`;
 }
 
+type DeckFilter = "all" | "mine" | "community";
+
 export function DecksPageClient({
   decks,
-  defaultUserId,
-  hasUsers,
+  isSignedIn,
+  authUserId,
   loadError,
 }: DecksPageClientProps) {
   const router = useRouter();
   const [list, setList] = useState<DeckListItem[]>(decks);
+  const [filter, setFilter] = useState<DeckFilter>("all");
   const [toast, setToast] = useState<string | null>(null);
+  const [syncingId, setSyncingId] = useState<string | null>(null);
 
   const newDeckDialogRef = useRef<HTMLDialogElement>(null);
-  const editDialogRef = useRef<HTMLDialogElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
 
   const [newDeckOpen, setNewDeckOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
-
-  const [editing, setEditing] = useState<DeckListItem | null>(null);
-  const editBaselineRef = useRef<DeckListItem | null>(null);
-  const [draftTitle, setDraftTitle] = useState("");
-  const [draftDescription, setDraftDescription] = useState("");
-  const [draftPublic, setDraftPublic] = useState(false);
 
   const [pendingDelete, setPendingDelete] = useState<DeckListItem | null>(
     null,
@@ -99,7 +87,6 @@ export function DecksPageClient({
   const deleteIndexRef = useRef<number>(0);
 
   const newFormId = useId();
-  const editFormId = useId();
 
   useEffect(() => {
     setList(decks);
@@ -126,18 +113,6 @@ export function DecksPageClient({
   }, [newDeckOpen]);
 
   useEffect(() => {
-    const dlg = editDialogRef.current;
-    if (!dlg) {
-      return;
-    }
-    if (editing) {
-      dlg.showModal();
-    } else {
-      dlg.close();
-    }
-  }, [editing]);
-
-  useEffect(() => {
     const dlg = deleteDialogRef.current;
     if (!dlg) {
       return;
@@ -148,15 +123,6 @@ export function DecksPageClient({
       dlg.close();
     }
   }, [pendingDelete]);
-
-  useEffect(() => {
-    if (editing) {
-      editBaselineRef.current = editing;
-      setDraftTitle(editing.title);
-      setDraftDescription(editing.description ?? "");
-      setDraftPublic(editing.is_public);
-    }
-  }, [editing]);
 
   useEffect(() => {
     if (
@@ -173,11 +139,35 @@ export function DecksPageClient({
   const stats = useMemo(
     () => ({
       deckCount: list.length,
-      publicCount: list.filter((d) => d.is_public).length,
+      publicCount: list.filter((d) => d.is_public && !d.isCommunity).length,
+      communityCount: list.filter((d) => d.isCommunity).length,
       cardTotal: list.reduce((sum, d) => sum + d.cardCount, 0),
     }),
     [list],
   );
+
+  const filteredList = useMemo(() => {
+    if (filter === "mine") {
+      return list.filter((d) => !d.isCommunity);
+    }
+    if (filter === "community") {
+      return list.filter((d) => d.isCommunity);
+    }
+    return list;
+  }, [list, filter]);
+
+  const handleSyncDeck = async (deckId: string) => {
+    setSyncingId(deckId);
+    setToast(null);
+    const result = await syncCommunityDeck({ copyDeckId: deckId });
+    setSyncingId(null);
+    if (result.error) {
+      setToast(result.error);
+      return;
+    }
+    setToast("Deck updated from the original.");
+    router.refresh();
+  };
 
   const openNewDeck = useCallback(() => {
     setNewTitle("");
@@ -198,12 +188,16 @@ export function DecksPageClient({
     const optimisticId = tempDeckId();
     const optimistic: DeckListItem = {
       id: optimisticId,
-      user_id: defaultUserId ?? "",
+      user_id: authUserId ?? "",
       title,
       description,
       is_public: false,
       created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
       cardCount: 0,
+      isCommunity: false,
+      sourceDeckId: null,
+      hasUpdateAvailable: false,
     };
 
     setList((prev) => [optimistic, ...prev]);
@@ -234,69 +228,11 @@ export function DecksPageClient({
                 description: r.description,
                 is_public: r.is_public,
                 created_at: r.created_at,
+                updated_at: r.created_at,
                 cardCount: 0,
-              }
-            : d,
-        ),
-      );
-      router.refresh();
-    }
-  };
-
-  const handleSaveEdit = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!editing) {
-      return;
-    }
-    const baseline = editBaselineRef.current ?? editing;
-    const title = draftTitle.trim();
-    if (!title) {
-      setToast("Title is required.");
-      return;
-    }
-    const description =
-      draftDescription.trim() === "" ? null : draftDescription.trim();
-
-    const nextRow: DeckListItem = {
-      ...editing,
-      title,
-      description,
-      is_public: draftPublic,
-    };
-
-    setList((prev) =>
-      prev.map((d) => (d.id === editing.id ? nextRow : d)),
-    );
-    setEditing(null);
-
-    const result = await updateDeck({
-      id: baseline.id,
-      title,
-      description,
-      is_public: draftPublic,
-    });
-
-    if (result.error) {
-      setList((prev) =>
-        prev.map((d) => (d.id === baseline.id ? baseline : d)),
-      );
-      setToast(result.error);
-      return;
-    }
-
-    if (result.data) {
-      const r = result.data;
-      setList((prev) =>
-        prev.map((d) =>
-          d.id === r.id
-            ? {
-                id: r.id,
-                user_id: r.user_id,
-                title: r.title,
-                description: r.description,
-                is_public: r.is_public,
-                created_at: r.created_at,
-                cardCount: d.cardCount,
+                isCommunity: false,
+                sourceDeckId: null,
+                hasUpdateAvailable: false,
               }
             : d,
         ),
@@ -355,25 +291,25 @@ export function DecksPageClient({
               Decks
             </h1>
             <p className="mt-2 max-w-xl text-pretty text-sm leading-relaxed text-zinc-600 sm:text-base">
-              Create decks, edit details, or generate flashcards from a prompt.
-              Changes save through the server and stay in sync with your
-              library.
+              Create decks or generate flashcards from a prompt. Open a deck to
+              edit its details and cards.
             </p>
           </div>
           <button
             type="button"
             onClick={openNewDeck}
-            disabled={!hasUsers}
+            disabled={!isSignedIn}
             className="inline-flex h-11 shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
           >
             New deck
           </button>
         </header>
 
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-4">
           {[
             { label: "Decks", value: stats.deckCount, sub: "In your library" },
-            { label: "Public", value: stats.publicCount, sub: "Visible to all" },
+            { label: "Yours", value: stats.deckCount - stats.communityCount, sub: "Created by you" },
+            { label: "Community", value: stats.communityCount, sub: "Saved from explore" },
             { label: "Cards", value: stats.cardTotal, sub: "Across decks" },
           ].map((s) => (
             <div
@@ -398,17 +334,16 @@ export function DecksPageClient({
           </div>
         ) : null}
 
-        {!hasUsers ? (
+        {!isSignedIn ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-            No rows in{" "}
-            <code className="rounded bg-white/80 px-1.5 py-0.5 font-mono text-xs">
-              users
-            </code>
-            . Run{" "}
-            <code className="rounded bg-white/80 px-1.5 py-0.5 font-mono text-xs">
-              npm run seed
-            </code>{" "}
-            first.
+            <Link href="/signup" className="font-semibold text-indigo-700 hover:text-indigo-900">
+              Sign up
+            </Link>{" "}
+            or{" "}
+            <Link href="/login" className="font-semibold text-indigo-700 hover:text-indigo-900">
+              sign in
+            </Link>{" "}
+            with your email to create decks.
           </div>
         ) : null}
 
@@ -429,10 +364,33 @@ export function DecksPageClient({
                 break → <strong>description</strong>. You will preview and edit
                 cards before saving.
               </p>
-              <DeckGenerateWizard hasUsers={hasUsers} />
+              <DeckGenerateWizard isSignedIn={isSignedIn} />
             </div>
           </div>
         </section>
+
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ["all", "All decks"],
+              ["mine", "My decks"],
+              ["community", "Community"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setFilter(value)}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                filter === value
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         {list.length === 0 && !loadError ? (
           <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/80 px-6 py-16 text-center">
@@ -442,21 +400,57 @@ export function DecksPageClient({
               above for AI-generated cards.
             </p>
           </div>
+        ) : filteredList.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-zinc-300 bg-zinc-50/80 px-6 py-16 text-center">
+            <p className="text-lg font-medium text-zinc-800">
+              No {filter === "community" ? "community" : filter === "mine" ? "personal" : ""} decks
+            </p>
+            <p className="mx-auto mt-2 max-w-md text-sm text-zinc-600">
+              {filter === "community" ? (
+                <>
+                  Save decks from{" "}
+                  <Link href="/explore" className="font-semibold text-indigo-700">
+                    Explore
+                  </Link>
+                  .
+                </>
+              ) : (
+                "Create a deck or adjust your filter."
+              )}
+            </p>
+          </div>
         ) : (
           <ul className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-            {list.map((deck) => (
+            {filteredList.map((deck) => (
               <li key={deck.id}>
-                <article className="flex h-full flex-col rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-sm ring-1 ring-zinc-950/5 transition hover:-translate-y-0.5 hover:border-indigo-300/80 hover:shadow-md">
+                <article
+                  className={`flex h-full flex-col rounded-2xl border p-5 shadow-sm ring-1 transition hover:-translate-y-0.5 hover:shadow-md ${
+                    deck.isCommunity
+                      ? "border-amber-300/90 bg-amber-50/90 ring-amber-200/60 hover:border-amber-400"
+                      : "border-zinc-200/90 bg-white ring-zinc-950/5 hover:border-indigo-300/80"
+                  }`}
+                >
                   <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={
-                        deck.is_public
-                          ? "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800"
-                          : "rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-600"
-                      }
-                    >
-                      {deck.is_public ? "Public" : "Private"}
-                    </span>
+                    {deck.isCommunity ? (
+                      <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-900">
+                        Community
+                      </span>
+                    ) : (
+                      <span
+                        className={
+                          deck.is_public
+                            ? "rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-800"
+                            : "rounded-full border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-600"
+                        }
+                      >
+                        {deck.is_public ? "Public" : "Private"}
+                      </span>
+                    )}
+                    {deck.hasUpdateAvailable ? (
+                      <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800">
+                        Update available
+                      </span>
+                    ) : null}
                     <time
                       dateTime={deck.created_at}
                       className="text-[11px] font-medium text-zinc-500"
@@ -493,19 +487,24 @@ export function DecksPageClient({
                     >
                       Study
                     </Link>
-                    <Link
-                      href={`/decks/${deck.id}/share`}
-                      className="inline-flex flex-1 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 py-2 text-center text-xs font-semibold text-zinc-800 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50 sm:flex-none"
-                    >
-                      Share
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => setEditing(deck)}
-                      className="inline-flex flex-1 items-center justify-center rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-900 shadow-sm transition hover:bg-indigo-100 sm:flex-none"
-                    >
-                      Edit
-                    </button>
+                    {deck.isCommunity ? null : (
+                      <Link
+                        href={`/decks/${deck.id}/share`}
+                        className="inline-flex flex-1 items-center justify-center rounded-lg border border-zinc-200 bg-white px-3 py-2 text-center text-xs font-semibold text-zinc-800 shadow-sm transition hover:border-zinc-300 hover:bg-zinc-50 sm:flex-none"
+                      >
+                        Share
+                      </Link>
+                    )}
+                    {deck.hasUpdateAvailable ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSyncDeck(deck.id)}
+                        disabled={syncingId === deck.id}
+                        className="inline-flex flex-1 items-center justify-center rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-center text-xs font-semibold text-sky-900 shadow-sm transition hover:bg-sky-100 sm:flex-none"
+                      >
+                        {syncingId === deck.id ? "Updating…" : "Update"}
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => {
@@ -592,82 +591,6 @@ export function DecksPageClient({
               </button>
             </div>
           </form>
-        </dialog>
-
-        <dialog
-          ref={editDialogRef}
-          id={editFormId}
-          className="w-[min(100vw-2rem,28rem)] rounded-2xl border border-zinc-200 bg-white p-0 text-zinc-900 shadow-2xl ring-1 ring-zinc-950/10 backdrop:bg-zinc-900/30"
-          onClose={() => setEditing(null)}
-        >
-          {editing ? (
-            <form
-              className="flex flex-col gap-5 p-7"
-              onSubmit={handleSaveEdit}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <h2 className="text-lg font-semibold text-zinc-900">
-                    Edit deck
-                  </h2>
-                  <p className="mt-0.5 text-xs text-zinc-500">
-                    Save to update the library; cancel leaves everything as it
-                    was.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="rounded-lg p-2 text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900"
-                  onClick={() => setEditing(null)}
-                  aria-label="Close"
-                >
-                  ✕
-                </button>
-              </div>
-              <label className="block text-sm">
-                <span className="font-medium text-zinc-700">Title</span>
-                <input
-                  value={draftTitle}
-                  onChange={(e) => setDraftTitle(e.target.value)}
-                  required
-                  className="mt-1.5 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm shadow-inner focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                />
-              </label>
-              <label className="block text-sm">
-                <span className="font-medium text-zinc-700">Description</span>
-                <textarea
-                  value={draftDescription}
-                  onChange={(e) => setDraftDescription(e.target.value)}
-                  rows={4}
-                  className="mt-1.5 w-full resize-y rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-sm shadow-inner focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                />
-              </label>
-              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm text-zinc-700">
-                <input
-                  type="checkbox"
-                  checked={draftPublic}
-                  onChange={(e) => setDraftPublic(e.target.checked)}
-                  className="h-4 w-4 rounded border-zinc-300 text-indigo-600 focus:ring-indigo-500/30"
-                />
-                Public deck
-              </label>
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  className="rounded-xl px-4 py-2.5 text-sm font-medium text-zinc-600 transition hover:bg-zinc-100"
-                  onClick={() => setEditing(null)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500"
-                >
-                  Save changes
-                </button>
-              </div>
-            </form>
-          ) : null}
         </dialog>
 
         <dialog

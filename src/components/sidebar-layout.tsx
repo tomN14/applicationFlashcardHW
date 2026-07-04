@@ -73,8 +73,13 @@ function MobileSidebar({ open, close, children }: React.PropsWithChildren<{ open
 export function SidebarLayout({
   navbar,
   sidebar,
+  desktopHeader,
   children,
-}: React.PropsWithChildren<{ navbar: React.ReactNode; sidebar: React.ReactNode }>) {
+}: React.PropsWithChildren<{
+  navbar: React.ReactNode
+  sidebar: React.ReactNode
+  desktopHeader?: React.ReactNode
+}>) {
   const [showSidebar, setShowSidebar] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
@@ -111,7 +116,7 @@ export function SidebarLayout({
 
   return (
     <SidebarLayoutContext.Provider value={layoutCtx}>
-      <div className="relative isolate flex min-h-svh w-full bg-zinc-50 max-lg:flex-col lg:bg-zinc-100">
+      <div className="relative isolate flex min-h-svh w-full bg-[var(--app-background)] max-lg:flex-col">
         {/* Sidebar on desktop */}
         <div
           className={clsx(
@@ -144,7 +149,12 @@ export function SidebarLayout({
             sidebarCollapsed ? 'lg:pl-[4.5rem]' : 'lg:pl-64'
           )}
         >
-          <div className="grow p-4 sm:p-6 lg:rounded-xl lg:bg-white lg:p-8 lg:shadow-sm lg:ring-1 lg:ring-zinc-950/5">
+          {desktopHeader ? (
+            <div className="hidden shrink-0 justify-end px-4 pt-3 sm:px-6 lg:flex lg:px-8">
+              {desktopHeader}
+            </div>
+          ) : null}
+          <div className="grow p-4 sm:p-6 lg:rounded-xl lg:bg-[var(--app-surface)] lg:p-8 lg:text-[var(--app-foreground)] lg:shadow-sm lg:ring-1 lg:ring-[var(--app-surface-border)]">
             <div className="mx-auto max-w-6xl">{children}</div>
           </div>
         </main>

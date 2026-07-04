@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getCurrentUserId } from "@/lib/auth/session";
 import { createSupabaseServerClient } from "@/lib/supabaseServer";
 
 export type DraftCardInput = { front: string; back: string };
@@ -19,6 +20,16 @@ export type DeckRecord = {
   created_at: string;
 };
 
+export type CardRecord = {
+  id: string;
+  deck_id: string;
+  front: string;
+  back: string;
+  position: number;
+  front_latex: boolean;
+  back_latex: boolean;
+};
+
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -34,20 +45,22 @@ function fail(message: string): DeckActionResult<never> {
   return { data: null, error: message };
 }
 
-async function getDefaultUserId(): Promise<string | null> {
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("users")
-    .select("id")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+async function touchDeckRevision(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  deckId: string,
+) {
+  await supabase
+    .from("decks")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", deckId);
+}
 
-  const row = data as { id: string } | null;
-  if (error || !row?.id) {
-    return null;
+async function requireUserId(): Promise<string | DeckActionResult<never>> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return fail("Please sign in to continue.");
   }
-  return row.id;
+  return userId;
 }
 
 export async function createDeck(input: {
@@ -71,10 +84,11 @@ export async function createDeck(input: {
     description = d;
   }
 
-  const userId = await getDefaultUserId();
-  if (!userId) {
-    return fail("No user found. Run the seed script first.");
+  const userIdResult = await requireUserId();
+  if (typeof userIdResult !== "string") {
+    return userIdResult;
   }
+  const userId = userIdResult;
 
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
@@ -142,6 +156,8 @@ export async function updateDeck(input: {
   }
 
   revalidatePath("/decks");
+  revalidatePath("/explore");
+  revalidatePath(`/explore/${input.id}`);
   revalidatePath(`/decks/${input.id}`);
   return ok(row);
 }
@@ -169,10 +185,11 @@ export async function createDeckWithCards(input: {
   description: string | null;
   cards: DraftCardInput[];
 }): Promise<DeckActionResult<{ deckId: string }>> {
-  const userId = await getDefaultUserId();
-  if (!userId) {
-    return fail("No user found. Run the seed script first.");
+  const userIdResult = await requireUserId();
+  if (typeof userIdResult !== "string") {
+    return userIdResult;
   }
+  const userId = userIdResult;
 
   const title =
     typeof input.title === "string" ? input.title.trim().slice(0, 512) : "";
@@ -230,4 +247,223 @@ export async function createDeckWithCards(input: {
   revalidatePath("/decks");
   revalidatePath(`/decks/${deck.id}`);
   return ok({ deckId: deck.id });
+}
+
+export async function addCardToDeck(input: {
+  deckId: string;
+  front: string;
+  back: string;
+  front_latex?: boolean;
+  back_latex?: boolean;
+}): Promise<DeckActionResult<CardRecord>> {
+  if (typeof input.deckId !== "string" || !isUuid(input.deckId)) {
+    return fail("Invalid deck id.");
+  }
+  const front = typeof input.front === "string" ? input.front.trim() : "";
+  const back = typeof input.back === "string" ? input.back.trim() : "";
+  if (!front || !back) {
+    return fail("Front and back are required.");
+  }
+
+  const supabase = await createSupabaseServerClient();
+
+  const { data: top, error: posErr } = await supabase
+    .from("cards")
+    .select("position")
+    .eq("deck_id", input.deckId)
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (posErr) {
+    return fail(posErr.message);
+  }
+
+  const row = top as { position: number } | null;
+  const position = (row?.position ?? -1) + 1;
+
+  const { data, error } = await supabase
+    .from("cards")
+    .insert({
+      deck_id: input.deckId,
+      front,
+      back,
+      position,
+      front_latex: Boolean(input.front_latex),
+      back_latex: Boolean(input.back_latex),
+    })
+    .select("id, deck_id, front, back, position, front_latex, back_latex")
+    .single();
+
+  const card = data as CardRecord | null;
+  if (error || !card) {
+    return fail(error?.message ?? "Could not add card.");
+  }
+
+  await touchDeckRevision(supabase, input.deckId);
+  revalidatePath(`/decks/${input.deckId}`);
+  revalidatePath(`/decks/${input.deckId}/study`);
+  revalidatePath("/explore");
+  revalidatePath(`/explore/${input.deckId}`);
+  return ok(card);
+}
+
+export async function updateCardInDeck(input: {
+  id: string;
+  deckId: string;
+  front: string;
+  back: string;
+  front_latex?: boolean;
+  back_latex?: boolean;
+}): Promise<DeckActionResult<CardRecord>> {
+  if (typeof input.id !== "string" || !isUuid(input.id)) {
+    return fail("Invalid card id.");
+  }
+  if (typeof input.deckId !== "string" || !isUuid(input.deckId)) {
+    return fail("Invalid deck id.");
+  }
+  const front = typeof input.front === "string" ? input.front.trim() : "";
+  const back = typeof input.back === "string" ? input.back.trim() : "";
+  if (!front || !back) {
+    return fail("Front and back are required.");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("cards")
+    .update({
+      front,
+      back,
+      front_latex: Boolean(input.front_latex),
+      back_latex: Boolean(input.back_latex),
+    })
+    .eq("id", input.id)
+    .eq("deck_id", input.deckId)
+    .select("id, deck_id, front, back, position, front_latex, back_latex")
+    .single();
+
+  const card = data as CardRecord | null;
+  if (error || !card) {
+    return fail(error?.message ?? "Could not update card.");
+  }
+
+  await touchDeckRevision(supabase, input.deckId);
+  revalidatePath(`/decks/${input.deckId}`);
+  revalidatePath(`/decks/${input.deckId}/study`);
+  revalidatePath("/explore");
+  revalidatePath(`/explore/${input.deckId}`);
+  return ok(card);
+}
+
+export async function deleteCardFromDeck(input: {
+  id: string;
+  deckId: string;
+}): Promise<DeckActionResult<{ id: string }>> {
+  if (typeof input.id !== "string" || !isUuid(input.id)) {
+    return fail("Invalid card id.");
+  }
+  if (typeof input.deckId !== "string" || !isUuid(input.deckId)) {
+    return fail("Invalid deck id.");
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase
+    .from("cards")
+    .delete()
+    .eq("id", input.id)
+    .eq("deck_id", input.deckId);
+
+  if (error) {
+    return fail(error.message);
+  }
+
+  await touchDeckRevision(supabase, input.deckId);
+  revalidatePath(`/decks/${input.deckId}`);
+  revalidatePath(`/decks/${input.deckId}/study`);
+  revalidatePath("/explore");
+  revalidatePath(`/explore/${input.deckId}`);
+  return ok({ id: input.id });
+}
+
+/**
+ * Persist card order. `orderedCardIds` is the full list of card ids for this
+ * deck in display order (position 0 .. n-1). Uses a two-phase position update
+ * to avoid unique (deck_id, position) conflicts while swapping. Temp positions
+ * use a high offset because `position` must be >= 0.
+ */
+export async function reorderDeckCards(input: {
+  deckId: string;
+  orderedCardIds: string[];
+}): Promise<DeckActionResult<{ count: number }>> {
+  if (typeof input.deckId !== "string" || !isUuid(input.deckId)) {
+    return fail("Invalid deck id.");
+  }
+  if (!Array.isArray(input.orderedCardIds)) {
+    return fail("orderedCardIds must be an array.");
+  }
+
+  const ids = input.orderedCardIds.filter(
+    (id): id is string => typeof id === "string" && isUuid(id),
+  );
+  if (ids.length === 0) {
+    return ok({ count: 0 });
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { data: rows, error: selErr } = await supabase
+    .from("cards")
+    .select("id")
+    .eq("deck_id", input.deckId);
+
+  if (selErr) {
+    return fail(selErr.message);
+  }
+
+  const existing = new Set((rows as { id: string }[]).map((r) => r.id));
+  if (existing.size !== ids.length) {
+    return fail("Card list does not match this deck.");
+  }
+  for (const id of ids) {
+    if (!existing.has(id)) {
+      return fail("Unknown card id in order.");
+    }
+  }
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) {
+      return fail("Duplicate card id in order.");
+    }
+    seen.add(id);
+  }
+
+  // Phase 1: move to high temporary positions (must stay >= 0 — see cards.position check).
+  const tempBase = 1_000_000;
+  for (let i = 0; i < ids.length; i += 1) {
+    const { error } = await supabase
+      .from("cards")
+      .update({ position: tempBase + i })
+      .eq("id", ids[i])
+      .eq("deck_id", input.deckId);
+    if (error) {
+      return fail(error.message);
+    }
+  }
+
+  for (let i = 0; i < ids.length; i += 1) {
+    const { error } = await supabase
+      .from("cards")
+      .update({ position: i })
+      .eq("id", ids[i])
+      .eq("deck_id", input.deckId);
+    if (error) {
+      return fail(error.message);
+    }
+  }
+
+  await touchDeckRevision(supabase, input.deckId);
+  revalidatePath(`/decks/${input.deckId}`);
+  revalidatePath(`/decks/${input.deckId}/study`);
+  revalidatePath("/explore");
+  revalidatePath(`/explore/${input.deckId}`);
+  return ok({ count: ids.length });
 }

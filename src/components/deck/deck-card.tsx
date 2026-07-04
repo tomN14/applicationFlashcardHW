@@ -27,7 +27,7 @@ export function DeckCard({ deck }: DeckCardProps) {
         </Link>
         {deck.cardCount != null ? (
           <span className="text-xs text-zinc-500">
-            {deck.cardCount} cards (placeholder)
+            {deck.cardCount} cards
           </span>
         ) : null}
       </div>

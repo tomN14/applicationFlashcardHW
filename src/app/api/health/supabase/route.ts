@@ -51,18 +51,36 @@ export async function GET() {
   const servicePresent =
     present("SUPABASE_SERVICE_ROLE_KEY") || present("SUPABASE_SECRET_KEY");
 
+  let urlHostname: string | null = null;
+  let urlParseError: string | null = null;
+  if (url) {
+    try {
+      urlHostname = new URL(url.includes("://") ? url : `https://${url}`).hostname;
+    } catch {
+      urlParseError = "SUPABASE_URL is not a valid URL (paste full Project URL from Supabase)";
+    }
+  }
+
+  const urlLooksLikeSupabase =
+    urlHostname != null && urlHostname.endsWith(".supabase.co");
+
   return NextResponse.json(
     {
       supabaseEnvOk,
       urlSet,
+      urlHostname,
+      urlLooksLikeSupabase,
+      urlParseError,
       serverKeyConfigured: servicePresent || keyOk,
       usesServiceRole: servicePresent,
       vercel: present("VERCEL"),
       vercelEnv: process.env.VERCEL_ENV ?? null,
       keysPresent: keys,
+      dnsHint:
+        "If /decks shows ENOTFOUND for *.supabase.co, the Project URL in Vercel is wrong or the Supabase project was deleted/paused. Copy Settings → API → Project URL exactly from dashboard.",
       hint: !supabaseEnvOk
         ? "Need SUPABASE_URL plus SUPABASE_SERVICE_ROLE_KEY (recommended; bypasses RLS) or anon/publishable keys. Names must match exactly. Redeploy after saving."
-        : null,
+        : urlParseError,
     },
     { headers: { "Cache-Control": "no-store" } },
   );

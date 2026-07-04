@@ -1,0 +1,3 @@
+-- Paste and run the full contents of:
+--   supabase/migrations/20260522130000_auth_signup_handle_new_user.sql
+-- in Supabase Dashboard → SQL Editor → Run

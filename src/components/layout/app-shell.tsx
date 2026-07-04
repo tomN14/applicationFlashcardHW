@@ -26,15 +26,13 @@ import {
   ArrowRightStartOnRectangleIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-  Cog8ToothIcon,
-  LightBulbIcon,
-  ShieldCheckIcon,
   UserIcon,
 } from "@heroicons/react/16/solid";
 import {
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
   Cog6ToothIcon,
+  GlobeAltIcon,
   HomeIcon,
   InboxIcon,
   MagnifyingGlassIcon,
@@ -47,10 +45,14 @@ import {
 } from "@heroicons/react/20/solid";
 import clsx from "clsx";
 import { usePathname } from "next/navigation";
+import { AuthMenu, type AuthMenuUser } from "@/components/auth/auth-menu";
 
 function navCurrent(pathname: string, href: string) {
   if (href === "/dashboard") {
     return pathname === "/dashboard";
+  }
+  if (href === "/explore") {
+    return pathname === "/explore" || pathname.startsWith("/explore/");
   }
   return pathname === href || pathname.startsWith(`${href}/`);
 }
@@ -70,18 +72,20 @@ function currentItemClass(active: boolean) {
   );
 }
 
-function AppSidebarRail() {
+function AppSidebarRail({ user }: { user: AuthMenuUser | null }) {
   const { sidebarCollapsed: c, toggleSidebar } = useSidebarLayout();
   const pathname = usePathname() ?? "";
   const dash = navCurrent(pathname, "/dashboard");
+  const profile = navCurrent(pathname, "/profile");
+  const explore = navCurrent(pathname, "/explore");
   const decks = navCurrent(pathname, "/decks");
   const study = navCurrent(pathname, "/study");
 
   return (
     <Sidebar
       className={clsx(
-        "h-full border-r border-zinc-200/90",
-        "bg-gradient-to-b from-white via-zinc-50/40 to-zinc-100/80",
+        "h-full border-r border-[var(--app-surface-border)]",
+        "bg-[var(--app-surface)] text-[var(--app-foreground)]",
         "shadow-[6px_0_32px_-16px_rgba(15,23,42,0.12)]"
       )}
     >
@@ -134,6 +138,15 @@ function AppSidebarRail() {
             <SidebarLabel className={labelCollapsedClass(c)}>Decks</SidebarLabel>
           </SidebarItem>
           <SidebarItem
+            href="/explore"
+            current={explore}
+            className={clsx(itemCollapsedClass(c), currentItemClass(explore))}
+            title="Explore"
+          >
+            <GlobeAltIcon data-slot="icon" className="size-5" />
+            <SidebarLabel className={labelCollapsedClass(c)}>Explore</SidebarLabel>
+          </SidebarItem>
+          <SidebarItem
             href="/study"
             current={study}
             className={clsx(itemCollapsedClass(c), currentItemClass(study))}
@@ -171,7 +184,10 @@ function AppSidebarRail() {
           </SidebarItem>
         </SidebarSection>
       </SidebarBody>
-      <SidebarFooter className="border-zinc-200/80 bg-white/30 backdrop-blur-sm">
+      <SidebarFooter className="border-[var(--app-surface-border)] bg-[var(--app-surface)]/80 backdrop-blur-sm">
+        <div className={clsx("mb-3 px-1", c && "lg:px-0")}>
+          <AuthMenu user={user} variant="sidebar" />
+        </div>
         <SidebarItem
           type="button"
           onClick={toggleSidebar}
@@ -197,7 +213,21 @@ function AppSidebarRail() {
           <QuestionMarkCircleIcon data-slot="icon" className="size-5" />
           <SidebarLabel className={labelCollapsedClass(c)}>Help</SidebarLabel>
         </SidebarItem>
-        <SidebarItem href="/dashboard" className={itemCollapsedClass(c)} title="Settings">
+        <SidebarItem
+          href="/profile"
+          current={profile}
+          className={itemCollapsedClass(c)}
+          title="Profile"
+        >
+          <UserIcon data-slot="icon" className="size-5" />
+          <SidebarLabel className={labelCollapsedClass(c)}>Profile</SidebarLabel>
+        </SidebarItem>
+        <SidebarItem
+          href="/dashboard"
+          current={dash}
+          className={itemCollapsedClass(c)}
+          title="Settings"
+        >
           <Cog6ToothIcon data-slot="icon" className="size-5" />
           <SidebarLabel className={labelCollapsedClass(c)}>Settings</SidebarLabel>
         </SidebarItem>
@@ -206,7 +236,13 @@ function AppSidebarRail() {
   );
 }
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  user,
+}: {
+  children: React.ReactNode;
+  user: AuthMenuUser | null;
+}) {
   const navbar = (
     <Navbar>
       <NavbarSpacer />
@@ -217,41 +253,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <NavbarItem href="/dashboard" aria-label="Inbox">
           <InboxIcon data-slot="icon" className="size-5" />
         </NavbarItem>
-        <Dropdown>
-          <DropdownButton as={NavbarItem}>
-            <Avatar initials="You" alt="Account" className="bg-zinc-200 text-zinc-700" square />
-          </DropdownButton>
-          <DropdownMenu className="min-w-64" anchor="bottom end">
-            <DropdownItem href="/dashboard">
-              <UserIcon data-slot="icon" className="size-5" />
-              <DropdownLabel>My profile</DropdownLabel>
-            </DropdownItem>
-            <DropdownItem href="/dashboard">
-              <Cog8ToothIcon data-slot="icon" className="size-5" />
-              <DropdownLabel>Settings</DropdownLabel>
-            </DropdownItem>
-            <DropdownDivider />
-            <DropdownItem href="/pricing">
-              <ShieldCheckIcon data-slot="icon" className="size-5" />
-              <DropdownLabel>Plans</DropdownLabel>
-            </DropdownItem>
-            <DropdownItem href="/contact">
-              <LightBulbIcon data-slot="icon" className="size-5" />
-              <DropdownLabel>Share feedback</DropdownLabel>
-            </DropdownItem>
-            <DropdownDivider />
-            <DropdownItem href="/">
-              <ArrowRightStartOnRectangleIcon data-slot="icon" className="size-5" />
-              <DropdownLabel>Home</DropdownLabel>
-            </DropdownItem>
-          </DropdownMenu>
-        </Dropdown>
+        <AuthMenu user={user} variant="navbar" />
       </NavbarSection>
     </Navbar>
   );
 
   return (
-    <SidebarLayout navbar={navbar} sidebar={<AppSidebarRail />}>
+    <SidebarLayout
+      navbar={navbar}
+      sidebar={<AppSidebarRail user={user} />}
+      desktopHeader={<AuthMenu user={user} variant="compact" />}
+    >
       {children}
     </SidebarLayout>
   );

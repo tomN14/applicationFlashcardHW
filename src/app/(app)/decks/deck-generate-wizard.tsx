@@ -27,10 +27,10 @@ function mapGeneratedToDraft(
 }
 
 type DeckGenerateWizardProps = {
-  hasUsers: boolean;
+  isSignedIn: boolean;
 };
 
-export function DeckGenerateWizard({ hasUsers }: DeckGenerateWizardProps) {
+export function DeckGenerateWizard({ isSignedIn }: DeckGenerateWizardProps) {
   const router = useRouter();
   const titleInputRef = useRef<HTMLInputElement>(null);
 
@@ -110,7 +110,7 @@ export function DeckGenerateWizard({ hasUsers }: DeckGenerateWizardProps) {
 
   const startWizard = async (initialPrompt: string) => {
     const trimmed = initialPrompt.trim();
-    if (!trimmed || !hasUsers) {
+    if (!trimmed || !isSignedIn) {
       return;
     }
     setPrompt(trimmed);
@@ -180,7 +180,7 @@ export function DeckGenerateWizard({ hasUsers }: DeckGenerateWizardProps) {
   if (!open) {
     return (
       <QuickCreateForm
-        hasUsers={hasUsers}
+        isSignedIn={isSignedIn}
         onSubmit={startWizard}
       />
     );
@@ -415,10 +415,10 @@ function WizardSteps({ phase }: { phase: "generate" | "preview" }) {
 }
 
 function QuickCreateForm({
-  hasUsers,
+  isSignedIn,
   onSubmit,
 }: {
-  hasUsers: boolean;
+  isSignedIn: boolean;
   onSubmit: (prompt: string) => void | Promise<void>;
 }) {
   const [localError, setLocalError] = useState<string | null>(null);
@@ -450,15 +450,11 @@ function QuickCreateForm({
       ) : null}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-zinc-500">
-          Assigns to earliest{" "}
-          <code className="rounded bg-zinc-100 px-1 font-mono text-[10px]">
-            users
-          </code>{" "}
-          row (pre-auth).
+          Saves to your account after you sign in.
         </p>
         <button
           type="submit"
-          disabled={!hasUsers}
+          disabled={!isSignedIn}
           className="inline-flex h-10 items-center rounded-xl bg-indigo-600 px-6 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Create deck

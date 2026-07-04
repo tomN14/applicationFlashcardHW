@@ -62,6 +62,8 @@ const DOCS_PER_USER_MAX = 3;
 const EVENTS_COUNT = 35;
 
 const SEED_EMAIL_DOMAIN = "recall-seed.local";
+/** Must match `SEED_DEV_EMAIL` in src/lib/dev-user.ts */
+const SEED_DEV_EMAIL = "faker_user_01@recall-seed.local";
 
 function seedEmail(i) {
   const n = String(i).padStart(2, "0");
@@ -334,6 +336,7 @@ async function main() {
 
   console.log(`Seed complete:
 - users inserted: ${userIds.length}
+- dev user: ${SEED_DEV_EMAIL}
 - documents inserted: ${documentIds.length}
 - decks inserted: ${decksInserted}
 - cards inserted: ${cardsInserted}
